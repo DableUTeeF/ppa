@@ -1,0 +1,41 @@
+{
+    "model" : {
+        "backend":              "MobileNet",
+        "input_size":           416,
+        "anchors":              [1.16,1.00, 2.29,2.61, 3.31,4.53, 6.12,5.31, 9.69,9.04],
+        "max_box_per_image":    10,
+        "labels":               ["abrigos", "anillos", "bolso", "botas", "bufandas", "calcetines y medias",
+                                 "camisas", "camisas ocultas debajo de la chaqueta", "carteras monederos",
+                                 "cazadoras", "chaquetas", "cinturones", "collares", "corbatas", "falda",
+                                 "gafas de sol", "guantes y manopla", "mochilas", "monos", "pantalones",
+                                 "pantalones cortos", "pendientes", "pulseras", "relojes", "ropa interior",
+                                 "sombreros", "trajes de baño", "undefined", "vestidos", "zapatos"]
+    },
+
+    "train": {
+        "train_image_folder":   "/media/palm/data/Cloth/dataset/dataset/",
+        "train_annot_folder":   "/media/palm/data/Cloth/data/data/",
+
+        "train_times":          10,
+        "pretrained_weights":   "weights/mnet_cloth.h5",
+        "batch_size":           16,
+        "learning_rate":        1e-5,
+        "nb_epochs":            20,
+        "warmup_epochs":        0,
+
+        "object_scale":         5.0 ,
+        "no_object_scale":      1.0,
+        "coord_scale":          1.0,
+        "class_scale":          1.0,
+
+        "saved_weights_name":   "weights/mnet_cloth.h5",
+        "debug":                false
+    },
+
+    "valid": {
+        "valid_image_folder":   "",
+        "valid_annot_folder":   "",
+
+        "valid_times":          1
+    }
+}
