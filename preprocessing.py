@@ -106,11 +106,14 @@ class BatchGenerator(Sequence):
                  shuffle=True,
                  jitter=True,
                  norm=None,
-                 flipflop=True):
+                 flipflop=True,
+                 shoechanger=True,
+                 ):
         self.generator = None
 
         self.flipflop = flipflop
-        if self.flipflop:
+        self.shoechanger = shoechanger
+        if self.flipflop or self.shoechanger:
             self.badshoes = []
             for im in os.listdir('imgs/more_badshoes'):
                 self.badshoes.append(cv2.imread('imgs/more_badshoes/'+im))
@@ -188,7 +191,8 @@ class BatchGenerator(Sequence):
             random_order=True
         )
 
-        if shuffle: np.random.shuffle(self.images)
+        if shuffle:
+            np.random.shuffle(self.images)
 
     def __len__(self):
         return int(np.ceil(float(len(self.images)) / self.config['BATCH_SIZE']))
@@ -206,7 +210,8 @@ class BatchGenerator(Sequence):
             annot = [obj['xmin'], obj['ymin'], obj['xmax'], obj['ymax'], self.config['LABELS'].index(obj['name'])]
             annots += [annot]
 
-        if len(annots) == 0: annots = [[]]
+        if len(annots) == 0:
+            annots = [[]]
 
         return np.array(annots)
 
@@ -285,7 +290,7 @@ class BatchGenerator(Sequence):
                         true_box_index = true_box_index % self.config['TRUE_BOX_BUFFER']
 
             # assign input image to x_batch
-            if self.norm != None:
+            if self.norm is not None:
                 x_batch[instance_count] = self.norm(img)
             else:
                 # plot image and bounding boxes for sanity check
@@ -308,16 +313,20 @@ class BatchGenerator(Sequence):
         return [x_batch, b_batch], y_batch
 
     def on_epoch_end(self):
-        if self.shuffle: np.random.shuffle(self.images)
+        if self.shuffle:
+            np.random.shuffle(self.images)
 
     def aug_image(self, train_instance, jitter):
         image_name = train_instance['filename']
         image = cv2.imread(image_name)
 
-        if image is None: print('Cannot find ', image_name)
+        if image is None:
+            print('Cannot find ', image_name)
 
         h, w, c = image.shape
         all_objs = copy.deepcopy(train_instance['object'])
+        changeable = []
+        hashelmet = False
 
         if jitter:
             ### scale the image
@@ -334,7 +343,8 @@ class BatchGenerator(Sequence):
 
             ### flip the image
             flip = np.random.binomial(1, .5)
-            if flip > 0.5: image = cv2.flip(image, 1)
+            if flip > 0.5:
+                image = cv2.flip(image, 1)
 
             image = self.aug_pipe.augment_image(image)
 
@@ -343,15 +353,22 @@ class BatchGenerator(Sequence):
         image = image[:, :, ::-1]
 
         # fix object's position and size
-        for obj in all_objs:
+        for idx, obj in enumerate(all_objs):
+            if obj['name'] == 'goodshoes':
+                changeable.append(idx)
+            if obj['name'] == 'helmet':
+                hashelmet = True
+
             for attr in ['xmin', 'xmax']:
-                if jitter: obj[attr] = int(obj[attr] * scale - offx)
+                if jitter:
+                    obj[attr] = int(obj[attr] * scale - offx)
 
                 obj[attr] = int(obj[attr] * float(self.config['IMAGE_W']) / w)
                 obj[attr] = max(min(obj[attr], self.config['IMAGE_W']), 0)
 
             for attr in ['ymin', 'ymax']:
-                if jitter: obj[attr] = int(obj[attr] * scale - offy)
+                if jitter:
+                    obj[attr] = int(obj[attr] * scale - offy)
 
                 obj[attr] = int(obj[attr] * float(self.config['IMAGE_H']) / h)
                 obj[attr] = max(min(obj[attr], self.config['IMAGE_H']), 0)
@@ -365,10 +382,9 @@ class BatchGenerator(Sequence):
         if self.flipflop and np.random.rand() > 0.85:
             im = copy.deepcopy(np.random.choice(self.badshoes))
             randsize = np.random.rand(2)
-            ssize = self.config['IMAGE_H']//8
+            ssize = self.config['IMAGE_H']//12
             im = cv2.resize(im, (ssize+int(ssize/2*randsize[0]), ssize+int(ssize/2*randsize[1]))).astype('float32')
-            im = random_channel_shift(im, 20)
-            # im = random_shift(im, 0.2, 0.2)
+            im = self.aug_pipe.augment_image(im)
             im = random_rotation(im, 60)
             im = im.astype('uint8')
             loc = (np.random.rand(2) * self.config['IMAGE_H']).astype('uint8')
@@ -379,5 +395,18 @@ class BatchGenerator(Sequence):
                              'ymax': loc[1]+im.shape[1],
                              'name': 'badshoes'
                              })
+
+        if self.shoechanger and hashelmet:
+            im = copy.deepcopy(np.random.choice(self.badshoes))
+            for idx in changeable:
+                if np.random.rand() < 0.85:
+                    continue
+                obj = all_objs[idx]
+                xsize = int(obj['xmax'] * 0.8 - obj['xmin'] * 0.8)
+                ysize = int(obj['ymax'] * 0.8 - obj['ymin'] * 0.8)
+                im = cv2.resize(im, (xsize, ysize))
+                im = self.aug_pipe.augment_image(im)
+                im = random_rotation(im, 60)
+                image[obj['ymin']:obj['ymin']+ysize, obj['xmin']:obj['xmin']+xsize, :] = im
 
         return image, all_objs

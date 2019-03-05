@@ -7,6 +7,7 @@ import json
 from utils import draw_boxes
 from PIL import Image
 from datetime import datetime
+import numpy as np
 
 
 def _main_():
@@ -31,27 +32,30 @@ def _main_():
     ###############################
     #   Start the training process
     ###############################
-    path = '/media/palm/data/Cloth/dataset/dataset/'
-    # path = ''
-    counter = 0
-    filename = '001dxxyile2uxkblr99uqo6fuhgprpccznlze0z0djhs9gkek2tsm8u5hsfzx62o.jpg'
-    # filename = 'download.jpeg'
-    image = cv2.imread(path + filename)
+    path = '/media/palm/data/ppa/v3/images/val/'
+    for i in range(20):
 
-    image = cv2.resize(image, (config['model']['input_size'], config['model']['input_size']))
-    hour = datetime.now().hour
-    minute = datetime.now().minute
-    second = datetime.now().second
-    ms = datetime.now().microsecond
-    j = 0
-    sums = 0
+        # path = ''
+        counter = 0
+        filename = '001dxxyile2uxkblr99uqo6fuhgprpccznlze0z0djhs9gkek2tsm8u5hsfzx62o.jpg'
+        # filename = 'download.jpeg'
+        p = os.path.join(path, np.random.choice(os.listdir(path)))
+        image = cv2.imread(p)
 
-    boxes = yolo.predict(image)
-    image = draw_boxes(image, boxes, config['model']['labels'])
-    im = Image.fromarray(image)
-    b, g, r = im.split()
-    im = Image.merge("RGB", (r, g, b))
-    im.show()
+        image = cv2.resize(image, (config['model']['input_size'], config['model']['input_size']))
+        hour = datetime.now().hour
+        minute = datetime.now().minute
+        second = datetime.now().second
+        ms = datetime.now().microsecond
+        j = 0
+        sums = 0
+
+        boxes = yolo.predict(image)
+        image = draw_boxes(image, boxes, config['model']['labels'])
+        im = Image.fromarray(image)
+        b, g, r = im.split()
+        im = Image.merge("RGB", (r, g, b))
+        im.show()
 
 
 if __name__ == '__main__':

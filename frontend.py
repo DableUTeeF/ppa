@@ -270,13 +270,16 @@ class YOLO(object):
         train_generator = BatchGenerator(train_imgs,
                                          generator_config,
                                          norm=normalize,
-                                         flipflop=False
+                                         flipflop=True,
+                                         shoechanger=True
                                          )
         valid_generator = BatchGenerator(valid_imgs,
                                          generator_config,
                                          norm=normalize,
                                          jitter=False,
-                                         flipflop=False)
+                                         flipflop=False,
+                                         shoechanger=False,
+                                         )
 
         self.warmup_batches = warmup_epochs * (train_times * len(train_generator) + valid_times * len(valid_generator))
 

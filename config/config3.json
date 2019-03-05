@@ -12,7 +12,7 @@
         "train_annot_folder":   "/media/palm/data/ppa/v3/anns/train/",
 
         "train_times":          10,
-        "pretrained_weights":   "weights/MobileNet_ppa_openimage_2.h5",
+        "pretrained_weights":   "",
         "batch_size":           16,
         "learning_rate":        1e-4,
         "nb_epochs":            15,
@@ -23,7 +23,7 @@
         "coord_scale":          1.0,
         "class_scale":          1.0,
 
-        "saved_weights_name":   "weights/MobileNet_ppa_openimage_2.h5",
+        "saved_weights_name":   "weights/MobileNet_ppa_openimage_4.h5",
         "debug":                false
     },
 
