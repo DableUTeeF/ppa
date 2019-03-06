@@ -10,7 +10,8 @@ from datetime import datetime
 import numpy as np
 
 
-def _main_():
+if __name__ == '__main__':
+
     config_path = 'config/config3.json'
 
     with open(config_path) as config_buffer:
@@ -33,6 +34,7 @@ def _main_():
     #   Start the training process
     ###############################
     path = '/media/palm/data/ppa/v3/images/val/'
+    pad = 0
     for i in range(20):
 
         # path = ''
@@ -41,7 +43,23 @@ def _main_():
         # filename = 'download.jpeg'
         p = os.path.join(path, np.random.choice(os.listdir(path)))
         image = cv2.imread(p)
+        if pad:
+            imsize = image.shape
+            if imsize[0] > imsize[1]:
+                tempim = np.zeros((imsize[0], imsize[0], 3), dtype='uint8')
+                distant = (imsize[0] - imsize[1]) // 2
+                tempim[:, distant:distant + imsize[1], :] = image
+                image = tempim
+                h = imsize[0]
+                w = imsize[0]
 
+            elif imsize[1] > imsize[0]:
+                tempim = np.zeros((imsize[1], imsize[1], 3), dtype='uint8')
+                distant = (imsize[1] - imsize[0]) // 2
+                tempim[distant:distant + imsize[0], :, :] = image
+                image = tempim
+                h = imsize[1]
+                w = imsize[1]
         image = cv2.resize(image, (config['model']['input_size'], config['model']['input_size']))
         hour = datetime.now().hour
         minute = datetime.now().minute
@@ -56,7 +74,3 @@ def _main_():
         b, g, r = im.split()
         im = Image.merge("RGB", (r, g, b))
         im.show()
-
-
-if __name__ == '__main__':
-    _main_()

@@ -84,6 +84,7 @@ def _main_():
                class_scale=config['train']['class_scale'],
                saved_weights_name=config['train']['saved_weights_name'],
                debug=config['train']['debug'])
+    yolo.model.save_weights(config['train']['saved_weights_name']+'tmp')
 
 
 if __name__ == '__main__':

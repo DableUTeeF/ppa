@@ -65,7 +65,7 @@ class YOLO(object):
         layer.set_weights([new_kernel, new_bias])
 
         # print a summary of the whole model
-        self.model.summary()
+        # self.model.summary()
 
     def custom_loss(self, y_true, y_pred):
         mask_shape = tf.shape(y_true)[:4]
@@ -270,8 +270,9 @@ class YOLO(object):
         train_generator = BatchGenerator(train_imgs,
                                          generator_config,
                                          norm=normalize,
-                                         flipflop=True,
-                                         shoechanger=True
+                                         flipflop=False,
+                                         shoechanger=False,
+                                         zeropad=True
                                          )
         valid_generator = BatchGenerator(valid_imgs,
                                          generator_config,
@@ -279,6 +280,7 @@ class YOLO(object):
                                          jitter=False,
                                          flipflop=False,
                                          shoechanger=False,
+                                         zeropad=True
                                          )
 
         self.warmup_batches = warmup_epochs * (train_times * len(train_generator) + valid_times * len(valid_generator))

@@ -108,6 +108,7 @@ class BatchGenerator(Sequence):
                  norm=None,
                  flipflop=True,
                  shoechanger=True,
+                 zeropad=True
                  ):
         self.generator = None
 
@@ -117,6 +118,8 @@ class BatchGenerator(Sequence):
             self.badshoes = []
             for im in os.listdir('imgs/more_badshoes'):
                 self.badshoes.append(cv2.imread('imgs/more_badshoes/'+im))
+
+        self.zeropad = zeropad
 
         self.images = images
         self.config = config
@@ -349,6 +352,31 @@ class BatchGenerator(Sequence):
             image = self.aug_pipe.augment_image(image)
 
             # resize the image to standard size
+
+        if self.zeropad:
+            imsize = image.shape
+            if imsize[0] > imsize[1]:
+                tempim = np.zeros((imsize[0], imsize[0], 3), dtype='uint8')
+                distant = (imsize[0] - imsize[1])//2
+                tempim[:, distant:distant + imsize[1], :] = image
+                image = tempim
+                h = imsize[0]
+                w = imsize[0]
+                for obj in all_objs:
+                    obj['xmin'] += distant
+                    obj['xmax'] += distant
+
+            elif imsize[1] > imsize[0]:
+                tempim = np.zeros((imsize[1], imsize[1], 3), dtype='uint8')
+                distant = (imsize[1] - imsize[0]) // 2
+                tempim[distant:distant + imsize[0], :, :] = image
+                image = tempim
+                h = imsize[1]
+                w = imsize[1]
+                for obj in all_objs:
+                    obj['ymin'] += distant
+                    obj['ymax'] += distant
+
         image = cv2.resize(image, (self.config['IMAGE_H'], self.config['IMAGE_W']))
         image = image[:, :, ::-1]
 
@@ -378,13 +406,12 @@ class BatchGenerator(Sequence):
                 obj['xmin'] = self.config['IMAGE_W'] - obj['xmax']
                 obj['xmax'] = self.config['IMAGE_W'] - xmin
 
-        # todo: Add shoes changer, random change good shoes to bad shoes in good person
         if self.flipflop and np.random.rand() > 0.85:
             im = copy.deepcopy(np.random.choice(self.badshoes))
             randsize = np.random.rand(2)
-            ssize = self.config['IMAGE_H']//12
+            ssize = self.config['IMAGE_H']//8
             im = cv2.resize(im, (ssize+int(ssize/2*randsize[0]), ssize+int(ssize/2*randsize[1]))).astype('float32')
-            im = self.aug_pipe.augment_image(im)
+            # im = self.aug_pipe.augment_image(im)
             im = random_rotation(im, 60)
             im = im.astype('uint8')
             loc = (np.random.rand(2) * self.config['IMAGE_H']).astype('uint8')
@@ -402,10 +429,10 @@ class BatchGenerator(Sequence):
                 if np.random.rand() < 0.85:
                     continue
                 obj = all_objs[idx]
-                xsize = int(obj['xmax'] * 0.8 - obj['xmin'] * 0.8)
-                ysize = int(obj['ymax'] * 0.8 - obj['ymin'] * 0.8)
+                xsize = int(obj['xmax'] - obj['xmin'])
+                ysize = int(obj['ymax'] - obj['ymin'])
                 im = cv2.resize(im, (xsize, ysize))
-                im = self.aug_pipe.augment_image(im)
+                # im = self.aug_pipe.augment_image(im)
                 im = random_rotation(im, 60)
                 image[obj['ymin']:obj['ymin']+ysize, obj['xmin']:obj['xmin']+xsize, :] = im
 
