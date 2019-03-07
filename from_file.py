@@ -36,6 +36,7 @@ if __name__ == '__main__':
     path = '/media/palm/data/ppa/v3/images/val/'
     pad = 0
     for i in range(20):
+    # if 1:
 
         # path = ''
         counter = 0
