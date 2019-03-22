@@ -1,0 +1,42 @@
+{
+    "model" : {
+        "min_input_size":       384,
+        "max_input_size":       800,
+        "anchors3":              [13,10, 25,27, 33,57, 36,137, 53,36, 54,243, 58,81, 81,138, 87,52, 90,323, 127,209, 129,96, 146,343, 213,363, 236,163, 332,351],
+        "anchors":              [17,16, 37,89, 41,39, 57,199, 83,71, 98,303, 152,144, 169,342, 303,348],
+        "anchors1":          [14,12, 25,36, 40,102, 50,46, 52,227, 88,72, 92,328, 94,136, 127,231, 167,350, 215,153, 295,368],
+        "labels":               ["person", "goodhelmet", "badhelmet", "LP", "goodshoes", "badshoes"]
+    },
+
+    "train": {
+        "train_image_folder":   "/media/palm/data/ppa/v6/images/train/",
+        "train_annot_folder":   "/media/palm/data/ppa/v6/anns/train/",
+        "cache_name":           "kangaroo_train.pkl",
+
+        "train_times":          2,
+        "batch_size":           1,
+        "learning_rate":        1e-4,
+        "nb_epochs":            150,
+        "warmup_epochs":        0,
+        "ignore_thresh":        0.5,
+        "gpus":                 "0",
+
+        "grid_scales":          [1,1,1],
+        "obj_scale":            2,
+        "noobj_scale":          2,
+        "xywh_scale":           2,
+        "class_scale":          2,
+
+        "tensorboard_dir":      "logs/v3",
+        "saved_weights_name":   "weights/ppa4.h5",
+        "debug":                false
+    },
+
+    "valid": {
+        "valid_image_folder":   "/media/palm/data/ppa/v6/images/val/",
+        "valid_annot_folder":   "/media/palm/data/ppa/v6/anns/val/",
+        "cache_name":           "",
+
+        "valid_times":          1
+    }
+}

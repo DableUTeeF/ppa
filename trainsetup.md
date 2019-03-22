@@ -1,4 +1,4 @@
-| weights                 | change             |  val_acc  | map    | person | helmet | goodshoes | badshoes | LP   |
+| weights                 | change             | val_loss  | map    | person | helmet | goodshoes | badshoes | LP   |
 |-------------------------|--------------------|-----------|--------|--------|--------|-----------|----------|------|
 |MobileNet_ppa_openimage_2| base for v3 data   | 0.8353@11 | 0.3812 | 0.6860 | 0.6310 | 0.1650    | 0.4167   |0.0074|
 |MobileNet_ppa_openimage_2| without augment**  | 0.9061@10 | 0.4655 | 0.6938 | 0.6310 | 0.2388    | 0.4728   |0.2863|
@@ -10,7 +10,15 @@
 |MNet_ppa_oim_7           | reduce box per im  | 0.9138@9  | 0.3910 | 0.6415 | 0.6728 | 0.2463    | 0.3454   |0.0490|
 |MNet_ppa_oim_8           | increase box       | 0.8792@14 | 0.4393 | 0.7394 | 0.6755 | 0.2058    | 0.3701   |0.2059|
 |MNet_ppa_oim_9           | use yolo v3        |           |
-|MNet_ppa_oim_10          | yolov3 new scale   |           |
+|MNet_ppa_oim_10          | yolov3 1   scale   |           |
+|MNet_ppa_oim_11          | yolov3 3 1* 2 sc   |           |
+|MNet_ppa_oim_12          | yolov3 1           |           |
+|MNet_ppa_oim_13          | original yolov3    |           |
+|MNet_ppa_oim_14          | oim2 with AdamW    |           |
+|MNet_ppa_oim_15          | 800*800 image      |           |
+|MNet_ppa_oim_16          | mnetv2 backend     |           |
+|MNet_ppa_oim_17          | mnetv2 16 batch    |           |
+|MNet_ppa_oim_18          | DenseNet1212       | 0.6498@13 | 0.5692 | 0.7794 | 0.7403 | 0.3103    | 0.5149   |0.5010|
 
 
 

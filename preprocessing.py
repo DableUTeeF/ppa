@@ -6,10 +6,11 @@ import json
 from imgaug import augmenters as iaa
 import keras.utils
 import xml.etree.ElementTree as ET
-from utils import BoundBox, bbox_iou, apply_random_scale_and_crop, random_distort_image, random_flip, correct_bounding_boxes
+from utils import BoundBox, bbox_iou, apply_random_scale_and_crop, random_distort_image, random_flip, \
+    correct_bounding_boxes
 from PIL import Image
 from keras.preprocessing.image import random_rotation
-
+import albumentations
 
 Sequence = keras.utils.Sequence
 
@@ -586,7 +587,8 @@ class Y3BatchGenerator(Sequence):
 
     def _get_net_size(self, idx):
         if idx % 10 == 0:
-            net_size = self.downsample * np.random.randint(self.min_net_size / self.downsample, self.max_net_size / self.downsample + 1)
+            net_size = self.downsample * np.random.randint(self.min_net_size / self.downsample,
+                                                           self.max_net_size / self.downsample + 1)
             # print("resizing: ", net_size, net_size)
             self.net_h, self.net_w = net_size, net_size
         return self.net_h, self.net_w
@@ -666,3 +668,394 @@ class Y3BatchGenerator(Sequence):
 
     def load_image(self, i):
         return cv2.imread(self.instances[i]['filename'])
+
+
+class BatchGenS1(BatchGenerator):
+    def __init__(self, images,
+                 config,
+                 shuffle=True,
+                 jitter=True,
+                 norm=None,
+                 flipflop=True,
+                 shoechanger=True,
+                 zeropad=True
+                 ):
+        self.generator = None
+
+        self.flipflop = flipflop
+        self.shoechanger = shoechanger
+        if self.flipflop or self.shoechanger:
+            self.badshoes = []
+            for im in os.listdir('imgs/more_badshoes'):
+                self.badshoes.append(cv2.imread('imgs/more_badshoes/' + im))
+
+        self.zeropad = zeropad
+
+        self.images = images
+        self.config = config
+
+        self.shuffle = shuffle
+        self.jitter = jitter
+        self.norm = norm
+
+        self.anchors = [BoundBox(0, 0, config['ANCHORS'][2 * i], config['ANCHORS'][2 * i + 1]) for i in
+                        range(int(len(config['ANCHORS']) // 2))]
+        self.labels_to_names = {0: 'goodhelmet', 1: 'LP', 2: 'goodshoes', 3: 'badshoes', 4: 'badhelmet', 5: 'person'}
+        self.names_to_labels = {'goodhelmet': 0, 'LP': 1, 'goodshoes': 2, 'badshoes': 3, 'badhelmet': 4, 'person': 5}
+
+        if shuffle:
+            np.random.shuffle(self.images)
+
+    def __len__(self):
+        return int(np.ceil(float(len(self.images)) / self.config['BATCH_SIZE']))
+
+    def num_classes(self):
+        return len(self.config['LABELS'])
+
+    def size(self):
+        return len(self.images)
+
+    def load_annotation(self, i):
+        annots = []
+
+        for obj in self.images[i]['object']:
+            annot = [obj['xmin'], obj['ymin'], obj['xmax'], obj['ymax'], self.config['LABELS'].index(obj['name'])]
+            annots += [annot]
+
+        if len(annots) == 0:
+            annots = [[]]
+
+        return np.array(annots)
+
+    def load_image(self, i):
+        return cv2.imread(self.images[i]['filename'])
+
+    def __getitem__(self, idx):
+        train_instance = self.images[idx]
+        # augment input image and fix object's position and size
+        augmented = self.aug_image(train_instance)
+        x_batch = np.expand_dims(augmented['image'], 0)
+        net_h, net_w = augmented['image'].shape[0:2]
+
+        b_batch = np.zeros((1, 1, 1, 1, self.config['TRUE_BOX_BUFFER'],
+                            4))  # list of self.config['TRUE_self.config['BOX']_BUFFER'] GT boxes
+        y_batch = np.zeros((1, net_h//32, net_w//32, self.config['BOX'],
+                            4 + 1 + len(self.config['LABELS'])))  # desired network output
+
+        # construct output from object's x, y, w, h
+        true_box_index = 0
+
+        for idx2, (xmin, ymin, xmax, ymax) in enumerate(augmented['bboxes']):
+            if xmax > xmin and ymax > ymin and augmented['category_id'][idx2] in self.config['LABELS']:
+                center_x = .5 * (xmin + xmax)
+                center_x = center_x / (float(self.config['IMAGE_W']) / self.config['GRID_W'])
+                center_y = .5 * (ymin + ymax)
+                center_y = center_y / (float(self.config['IMAGE_H']) / self.config['GRID_H'])
+
+                grid_x = int(np.floor(center_x))
+                grid_y = int(np.floor(center_y))
+
+                if grid_x < self.config['GRID_W'] and grid_y < self.config['GRID_H']:
+                    obj_indx = augmented['category_id'][idx2]
+
+                    center_w = (xmax - xmin) / (
+                            float(self.config['IMAGE_W']) / self.config['GRID_W'])  # unit: grid cell
+                    center_h = (ymax - ymin) / (
+                            float(self.config['IMAGE_H']) / self.config['GRID_H'])  # unit: grid cell
+
+                    box = [center_x, center_y, center_w, center_h]
+
+                    # find the anchor that best predicts this box
+                    best_anchor = -1
+                    max_iou = -1
+
+                    shifted_box = BoundBox(0,
+                                           0,
+                                           center_w,
+                                           center_h)
+
+                    for i in range(len(self.anchors)):
+                        anchor = self.anchors[i]
+                        iou = bbox_iou(shifted_box, anchor)
+
+                        if max_iou < iou:
+                            best_anchor = i
+                            max_iou = iou
+
+                    # assign ground truth x, y, w, h, confidence and class probs to y_batch
+                    y_batch[0, grid_y, grid_x, best_anchor, 0:4] = box
+                    y_batch[0, grid_y, grid_x, best_anchor, 4] = 1.
+                    y_batch[0, grid_y, grid_x, best_anchor, 5 + obj_indx] = 1
+
+                    # assign the true box to b_batch
+                    b_batch[0, 0, 0, 0, true_box_index] = box
+
+                    true_box_index += 1
+                    true_box_index = true_box_index % self.config['TRUE_BOX_BUFFER']
+
+        # assign input image to x_batch
+        x_batch = self.norm(x_batch)
+
+        return [x_batch, b_batch], y_batch
+
+    def on_epoch_end(self):
+        if self.shuffle:
+            np.random.shuffle(self.images)
+
+    def aug_image(self, instance):
+        image_name = instance['filename']
+        image = cv2.imread(image_name)  # RGB image
+
+        if image is None:
+            print('Cannot find ', image_name)
+        image = image[:, :, ::-1]  # RGB image
+        image_h, image_w, _ = image.shape
+
+        image, new_w, new_h = minmaxresize(image, 352, 544)
+
+        # determine the amount of scaling and cropping
+        dw = image_w - (self.jitter * image_w)
+        dh = image_h - (self.jitter * image_h)
+        all_objs = correct_bounding_boxes(instance['object'], new_w, new_h, new_w, new_h, 0, 0, 0, image_w,
+                                          image_h)
+
+        # alabumentation setup
+        annotations = {'image': image, 'bboxes': [],
+                       'category_id': []}
+        for ann in all_objs:
+            annotations['category_id'].append(self.names_to_labels[ann['name']])
+            annotations['bboxes'].append(
+                [ann['xmin'], ann['ymin'], ann['xmax'], ann['ymax']])
+        aug = albumentations.Compose([albumentations.RGBShift(),
+                                      albumentations.HorizontalFlip(),
+                                      # albumentations.ShiftScaleRotate(scale_limit=1.),
+                                      albumentations.CLAHE(),
+                                      albumentations.RandomGamma(),
+                                      ],
+                                     bbox_params={'format': 'pascal_voc', 'label_fields': ['category_id']})
+        augmented = aug(**annotations)
+        return augmented
+
+
+class Y3BatchGeneratorS1(Sequence):
+    def __init__(self,
+                 instances,
+                 anchors,
+                 labels,
+                 downsample=32,  # ratio between network input's size and network output's size, 32 for YOLOv3
+                 max_box_per_image=30,
+                 batch_size=1,
+                 min_net_size=320,
+                 max_net_size=608,
+                 shuffle=True,
+                 jitter=True,
+                 norm=None
+                 ):
+        self.instances = instances
+        self.batch_size = 1
+        self.labels = labels
+        self.downsample = downsample
+        self.max_box_per_image = max_box_per_image
+        self.min_net_size = (min_net_size // self.downsample) * self.downsample
+        self.max_net_size = (max_net_size // self.downsample) * self.downsample
+        self.shuffle = shuffle
+        self.jitter = jitter
+        self.norm = norm
+        self.anchors = [BoundBox(0, 0, anchors[2 * i], anchors[2 * i + 1]) for i in range(len(anchors) // 2)]
+        self.labels_to_names = {0: 'goodhelmet', 1: 'LP', 2: 'goodshoes', 3: 'badshoes', 4: 'badhelmet', 5: 'person'}
+        self.names_to_labels = {'goodhelmet': 0, 'LP': 1, 'goodshoes': 2, 'badshoes': 3, 'badhelmet': 4, 'person': 5}
+
+        if shuffle:
+            np.random.shuffle(self.instances)
+
+    def __len__(self):
+        return int(np.ceil(float(len(self.instances)) / self.batch_size))
+
+    def __getitem__(self, idx):
+        # get image input size, change every 10 batches
+        # do the logic to fill in the inputs and the output
+        train_instance = self.instances[idx]
+        # augment input image and fix object's position and size
+        # img, all_objs = self._aug_image(train_instance, net_h, net_w)
+        augmented = self._aug_image(train_instance)
+
+        net_h, net_w = augmented['image'].shape[0:2]
+        x_batch = np.expand_dims(augmented['image'], 0)
+
+        base_grid_h, base_grid_w = net_h // self.downsample, net_w // self.downsample
+        gt_batch = np.zeros((1, 1, 1, 1, self.max_box_per_image, 4))  # list of groundtruth boxes
+
+        # initialize the inputs and the outputs
+        yolo_1 = np.zeros((1, 1 * base_grid_h, 1 * base_grid_w, len(self.anchors) // 3,
+                           4 + 1 + len(self.labels)))  # desired network output 1
+        yolo_2 = np.zeros((1, 2 * base_grid_h, 2 * base_grid_w, len(self.anchors) // 3,
+                           4 + 1 + len(self.labels)))  # desired network output 2
+        yolo_3 = np.zeros((1, 4 * base_grid_h, 4 * base_grid_w, len(self.anchors) // 3,
+                           4 + 1 + len(self.labels)))  # desired network output 3
+        yolos = [yolo_3, yolo_2, yolo_1]
+
+        dummy_yolo_1 = np.zeros((1, 1))
+        dummy_yolo_2 = np.zeros((1, 1))
+        dummy_yolo_3 = np.zeros((1, 1))
+
+        instance_count = 0
+        true_box_index = 0
+
+        for idx2, (xmin, ymin, xmax, ymax) in enumerate(augmented['bboxes']):
+            xmin = int(xmin)
+            xmax = int(xmax)
+            ymin = int(ymin)
+            ymax = int(ymax)
+            # find the best anchor box for this object
+            max_anchor = None
+            max_index = -1
+            max_iou = -1
+
+            shifted_box = BoundBox(0,
+                                   0,
+                                   xmax - xmin,
+                                   ymax - ymin)
+
+            for i in range(len(self.anchors)):
+                anchor = self.anchors[i]
+                iou = bbox_iou(shifted_box, anchor)
+
+                if max_iou < iou:
+                    max_anchor = anchor
+                    max_index = i
+                    max_iou = iou
+
+                    # determine the yolo to be responsible for this bounding box
+            yolo = yolos[max_index // 3]
+            grid_h, grid_w = yolo.shape[1:3]
+
+            # determine the position of the bounding box on the grid
+            center_x = .5 * (xmin + xmax)
+            center_x = center_x / float(net_w) * grid_w  # sigma(t_x) + c_x
+            center_y = .5 * (ymin + ymax)
+            center_y = center_y / float(net_h) * grid_h  # sigma(t_y) + c_y
+
+            # determine the sizes of the bounding box
+            w = np.log((xmax - xmin) / float(max_anchor.xmax))  # t_w
+            h = np.log((ymax - ymin) / float(max_anchor.ymax))  # t_h
+
+            box = [center_x, center_y, w, h]
+
+            # determine the index of the label
+            obj_indx = augmented['category_id'][idx2]
+
+            # determine the location of the cell responsible for this object
+            grid_x = int(np.floor(center_x))
+            grid_y = int(np.floor(center_y))
+
+            # assign ground truth x, y, w, h, confidence and class probs to y_batch
+            yolo[0, grid_y, grid_x, max_index % 3] = 0
+            yolo[0, grid_y, grid_x, max_index % 3, 0:4] = box
+            yolo[0, grid_y, grid_x, max_index % 3, 4] = 1.
+            yolo[0, grid_y, grid_x, max_index % 3, 5 + obj_indx] = 1
+
+            # assign the true box to t_batch
+            true_box = [center_x, center_y, xmax - xmin, ymax - ymin]
+            gt_batch[0, 0, 0, 0, true_box_index] = true_box
+
+            true_box_index += 1
+            true_box_index = true_box_index % self.max_box_per_image
+
+            # assign input image to x_batch
+            x_batch = self.norm(x_batch)
+
+        return [x_batch, gt_batch, yolo_1, yolo_2, yolo_3], [dummy_yolo_1, dummy_yolo_2, dummy_yolo_3]
+
+    def _aug_image(self, instance):
+        image_name = instance['filename']
+        image = cv2.imread(image_name)  # RGB image
+
+        if image is None:
+            print('Cannot find ', image_name)
+        image = image[:, :, ::-1]  # RGB image
+        image_h, image_w, _ = image.shape
+
+        image, new_w, new_h = minmaxresize(image, self.min_net_size, self.max_net_size)
+
+        # determine the amount of scaling and cropping
+        dw = image_w - (self.jitter * image_w)
+        dh = image_h - (self.jitter * image_h)
+        all_objs = correct_bounding_boxes(instance['object'], new_w, new_h, new_w, new_h, 0, 0, 0, image_w,
+                                          image_h)
+
+        # alabumentation setup
+        annotations = {'image': image, 'bboxes': [],
+                       'category_id': []}
+        for ann in all_objs:
+            annotations['category_id'].append(self.names_to_labels[ann['name']])
+            annotations['bboxes'].append(
+                [ann['xmin'], ann['ymin'], ann['xmax'], ann['ymax']])
+        aug = albumentations.Compose([albumentations.RGBShift(),
+                                      albumentations.HorizontalFlip(),
+                                      # albumentations.ShiftScaleRotate(scale_limit=1.),
+                                      albumentations.CLAHE(),
+                                      albumentations.RandomGamma(),
+                                      ],
+                                     bbox_params={'format': 'pascal_voc', 'label_fields': ['category_id']})
+        augmented = aug(**annotations)
+        return augmented
+
+    def on_epoch_end(self):
+        if self.shuffle:
+            np.random.shuffle(self.instances)
+
+    def num_classes(self):
+        return len(self.labels)
+
+    def size(self):
+        return len(self.instances)
+
+    def get_anchors(self):
+        anchors = []
+
+        for anchor in self.anchors:
+            anchors += [anchor.xmax, anchor.ymax]
+
+        return anchors
+
+    def load_annotation(self, i):
+        annots = []
+
+        for obj in self.instances[i]['object']:
+            annot = [obj['xmin'], obj['ymin'], obj['xmax'], obj['ymax'], self.labels.index(obj['name'])]
+            annots += [annot]
+
+        if len(annots) == 0:
+            annots = [[]]
+
+        return np.array(annots)
+
+    def load_image(self, i):
+        return cv2.imread(self.instances[i]['filename'])
+
+
+def minmaxresize(image, minside, maxside):
+    if maxside >= image.shape[0] >= minside and maxside >= image.shape[1] >= minside:
+        h = image.shape[0] // 32 * 32
+        w = image.shape[1] // 32 * 32
+        image = cv2.resize(image, (w, h))
+        return image, w, h
+
+    if image.shape[1] > maxside:
+        w = maxside
+        h = minside if w / image.shape[1] * image.shape[0] < minside else w / image.shape[1] * image.shape[0] // 32 * 32
+    elif image.shape[0] > maxside:
+        h = maxside
+        w = minside if h / image.shape[0] * image.shape[1] < minside else h / image.shape[0] * image.shape[1] // 32 * 32
+    elif image.shape[1] < minside:
+        w = minside
+        h = maxside if w / image.shape[1] * image.shape[0] > maxside else w / image.shape[1] * image.shape[0] // 32 * 32
+    elif image.shape[0] < minside:
+        h = minside
+        w = maxside if h / image.shape[0] * image.shape[1] > maxside else h / image.shape[0] * image.shape[1] // 32 * 32
+    else:
+        h = image.shape[0] // 32 * 32
+        w = image.shape[1] // 32 * 32
+    w, h = int(w), int(h)
+    image = cv2.resize(image, (w, h))
+    return image, w, h

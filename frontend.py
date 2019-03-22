@@ -2,9 +2,17 @@ import tensorflow as tf
 import numpy as np
 import datetime
 import cv2
-from keras.applications.mobilenet import MobileNet, DepthwiseConv2D
-from utils import decode_netout, compute_overlap, compute_ap
-from preprocessing import BatchGenerator
+from keras.applications.mobilenet import MobileNet
+from keras.applications.mobilenetv2 import MobileNetV2
+from keras.applications.densenet import DenseNet121
+
+try:
+    from keras.applications.mobilenet import DepthwiseConv2D
+except ImportError:
+    from keras.layers import DepthwiseConv2D
+from keras.applications.resnet50 import ResNet50
+from utils import decode_netout, compute_overlap, compute_ap, AdamW
+from preprocessing import BatchGenerator, BatchGenS1
 from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, ReduceLROnPlateau
 from backend import MobileNet as TFMNet, KSMobileNet
 from keras import models, layers, optimizers
@@ -36,12 +44,21 @@ class YOLO(object):
         ##########################
 
         # make the feature extractor layers
-        input_image = layers.Input(shape=(self.input_size, self.input_size, 3))
+        input_image = layers.Input(shape=(None, None, 3))
         self.true_boxes = layers.Input(shape=(1, 1, 1, max_box_per_image, 4))
 
         if backend == 'MobileNet':
             self.feature_extractor = MobileNet(input_tensor=input_image)
             features = self.feature_extractor.get_layer('conv_pw_13_relu').output
+        elif backend == 'MobileNetV2':
+            self.feature_extractor = MobileNetV2(input_tensor=input_image)
+            features = self.feature_extractor.get_layer('out_relu').output
+        elif backend == 'DenseNet121':
+            self.feature_extractor = DenseNet121(input_tensor=input_image)
+            features = self.feature_extractor.get_layer('relu').output
+        elif backend == 'ResNet50':
+            self.feature_extractor = ResNet50(input_tensor=input_image)
+            features = self.feature_extractor.get_layer('activation_49').output
         else:
             self.feature_extractor = KSMobileNet(input_tensor=input_image)
             features = self.feature_extractor.get_layer('conv_pw_7_relu').output
@@ -89,7 +106,7 @@ class YOLO(object):
         Adjust prediction
         """
         ### adjust x and y
-        pred_box_xy = tf.sigmoid(y_pred[..., :2]) + cell_grid
+        pred_box_xy = tf.sigmoid(tf.clip_by_value(y_pred[..., :2], 1.18e-38, float('inf'))) + cell_grid
 
         ### adjust w and h
         pred_box_wh = tf.exp(y_pred[..., 2:4]) * np.reshape(self.anchors, [1, 1, 1, self.nb_box, 2])
@@ -471,6 +488,8 @@ class YOLO(object):
         dummy_array = np.zeros((1, 1, 1, 1, self.max_box_per_image, 4))
 
         netout = self.model.predict([input_image, dummy_array])[0]
+        netout = np.array(netout)
+        netout = np.reshape(netout, (netout.shape[0], netout.shape[1], self.nb_box, 4 + 1 + self.nb_class))
         boxes = decode_netout(netout, self.anchors, self.nb_class)
 
         return boxes
@@ -974,7 +993,7 @@ def mnet_yolov3_model(
                             xywh_scale,
                             class_scale)([input_image, pred_yolo_1, true_yolo_1, true_boxes])
 
-    skip_61 = mnet.get_layer('conv_pw_11_relu').output
+    skip_61 = mnet.get_layer('conv_pw_11_relu').output  # 14*14/224*224
     x = _dw_conv_block(x, [{'filter': 256, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 84}],
                        do_skip=False)
     x = layers.UpSampling2D(2)(x)
@@ -1005,7 +1024,119 @@ def mnet_yolov3_model(
                             xywh_scale,
                             class_scale)([input_image, pred_yolo_2, true_yolo_2, true_boxes])
 
-    skip_36 = mnet.get_layer('conv_pw_5_relu').output
+    skip_36 = mnet.get_layer('conv_pw_5_relu').output  # 28*28
+    x = _dw_conv_block(x, [{'filter': 128, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 96}],
+                       do_skip=False)
+    x = layers.UpSampling2D(2)(x)
+    x = layers.concatenate([x, skip_36])
+
+    # Layer 99 => 106
+    pred_yolo_3 = _dw_conv_block(x,
+                                 [{'filter': 128, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True,
+                                   'layer_idx': 99},
+                                  {'filter': 256, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True,
+                                   'layer_idx': 100},
+                                  {'filter': 128, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True,
+                                   'layer_idx': 101},
+                                  {'filter': 256, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True,
+                                   'layer_idx': 102},
+                                  {'filter': 128, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True,
+                                   'layer_idx': 103},
+                                  {'filter': 256, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True,
+                                   'layer_idx': 104},
+                                  {'filter': (3 * (5 + nb_class)), 'kernel': 1, 'stride': 1, 'bnorm': False,
+                                   'leaky': False, 'layer_idx': 105}], do_skip=False)
+    loss_yolo_3 = YoloLayer(anchors[:6],
+                            [4 * num for num in max_grid],
+                            batch_size,
+                            warmup_batches,
+                            ignore_thresh,
+                            grid_scales[2],
+                            obj_scale,
+                            noobj_scale,
+                            xywh_scale,
+                            class_scale)([input_image, pred_yolo_3, true_yolo_3, true_boxes])
+
+    train_model = models.Model([input_image, true_boxes, true_yolo_1, true_yolo_2, true_yolo_3],
+                               [loss_yolo_1, loss_yolo_2, loss_yolo_3])
+    infer_model = models.Model(input_image, [pred_yolo_1, pred_yolo_2, pred_yolo_3])
+
+    return [train_model, infer_model]
+
+
+def rnet50_yolov3_model(
+        nb_class,
+        anchors,
+        max_box_per_image,
+        max_grid,
+        batch_size,
+        warmup_batches,
+        ignore_thresh,
+        grid_scales,
+        obj_scale,
+        noobj_scale,
+        xywh_scale,
+        class_scale
+):
+    input_image = layers.Input(shape=(None, None, 3))  # net_h, net_w, 3
+    true_boxes = layers.Input(shape=(1, 1, 1, max_box_per_image, 4))
+    true_yolo_1 = layers.Input(
+        shape=(None, None, len(anchors) // 6, 4 + 1 + nb_class))  # grid_h, grid_w, nb_anchor, 5+nb_class
+    true_yolo_2 = layers.Input(
+        shape=(None, None, len(anchors) // 6, 4 + 1 + nb_class))  # grid_h, grid_w, nb_anchor, 5+nb_class
+    true_yolo_3 = layers.Input(
+        shape=(None, None, len(anchors) // 6, 4 + 1 + nb_class))  # grid_h, grid_w, nb_anchor, 5+nb_class
+
+    mnet = ResNet50(input_tensor=input_image, weights='imagenet', include_top=False)
+    x = mnet.get_layer('activation_49').output
+    # Layer 80 => 82
+    pred_yolo_1 = _dw_conv_block(x, [
+        {'filter': 1024, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 80},
+        {'filter': (3 * (5 + nb_class)), 'kernel': 1, 'stride': 1, 'bnorm': False, 'leaky': False, 'layer_idx': 81}],
+                                 do_skip=False)
+    loss_yolo_1 = YoloLayer(anchors[12:],
+                            [1 * num for num in max_grid],
+                            batch_size,
+                            warmup_batches,
+                            ignore_thresh,
+                            grid_scales[0],
+                            obj_scale,
+                            noobj_scale,
+                            xywh_scale,
+                            class_scale)([input_image, pred_yolo_1, true_yolo_1, true_boxes])
+
+    skip_61 = mnet.get_layer('activation_40').output
+    x = _dw_conv_block(x, [{'filter': 256, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 84}],
+                       do_skip=False)
+    x = layers.UpSampling2D(2)(x)
+    x = layers.concatenate([x, skip_61])
+
+    # Layer 87 => 91
+    x = _dw_conv_block(x, [{'filter': 256, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 87},
+                           {'filter': 512, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 88},
+                           {'filter': 256, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 89},
+                           {'filter': 512, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 90},
+                           {'filter': 256, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 91}],
+                       do_skip=False)
+
+    # Layer 92 => 94
+    pred_yolo_2 = _dw_conv_block(x,
+                                 [{'filter': 512, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True,
+                                   'layer_idx': 92},
+                                  {'filter': (3 * (5 + nb_class)), 'kernel': 1, 'stride': 1, 'bnorm': False,
+                                   'leaky': False, 'layer_idx': 93}], do_skip=False)
+    loss_yolo_2 = YoloLayer(anchors[6:12],
+                            [2 * num for num in max_grid],
+                            batch_size,
+                            warmup_batches,
+                            ignore_thresh,
+                            grid_scales[1],
+                            obj_scale,
+                            noobj_scale,
+                            xywh_scale,
+                            class_scale)([input_image, pred_yolo_2, true_yolo_2, true_boxes])
+
+    skip_36 = mnet.get_layer('activation_22').output
     x = _dw_conv_block(x, [{'filter': 128, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 96}],
                        do_skip=False)
     x = layers.UpSampling2D(2)(x)

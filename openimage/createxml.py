@@ -1,5 +1,6 @@
 from xml.etree import cElementTree as ET
 from PIL import Image
+import os
 
 
 """
@@ -22,14 +23,19 @@ if __name__ == '__main__':
             if elm[0] not in objlist:
                 objlist[elm[0]] = []
 
-            objlist[elm[0]].append([classlist[elm[2]], *elm[3:8], elm[8]+elm[10]+elm[11]])
+            objlist[elm[0]].append([classlist[elm[2]], *elm[3:8], int(elm[8])+int(elm[10])+int(elm[11])])
     del instantlist
 
-    rootpath = '/media/palm/data/openimage/vrp/'
+    rootpath = '/media/palm/data/ppa/v5/anns/train/'
+    impath = '/media/palm/data/ppa/v5/images/train/'
     for key in objlist:
         anns = objlist[key]
+        if os.path.exists(os.path.join(rootpath, key+'.xml')):
+            continue
+        if not os.path.exists(os.path.join(impath, key+'.jpg')):
+            continue
         try:
-            image = Image.open(rootpath+key+'.jpg')
+            image = Image.open(impath+key+'.jpg')
             width, height = image.size
             root = ET.Element('annotation')
             ET.SubElement(root, 'filename').text = key+'.jpg'
@@ -43,6 +49,8 @@ if __name__ == '__main__':
                 obj = ET.SubElement(root, 'object')
                 if ann[0].lower() in ['boot', 'footware']:
                     ann[0] = 'goodshoes'
+                if ann[0].lower() == 'vehicle registration plate':
+                    ann[0] = 'LP'
                 ET.SubElement(obj, 'name').text = ann[0]
                 bndbx = ET.SubElement(obj, 'bndbox')
                 ET.SubElement(bndbx, 'xmin').text = str(int(float(ann[2])*width))
@@ -50,6 +58,6 @@ if __name__ == '__main__':
                 ET.SubElement(bndbx, 'ymin').text = str(int(float(ann[4])*height))
                 ET.SubElement(bndbx, 'ymax').text = str(int(float(ann[5])*height))
             tree = ET.ElementTree(root)
-            tree.write('/media/palm/data/ppa/v3/anns/'+key+'.xml')
+            tree.write(rootpath+key+'.xml')
         except FileNotFoundError:
-            pass
+            print(key)

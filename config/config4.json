@@ -3,6 +3,7 @@
         "min_input_size":       288,
         "max_input_size":       448,
         "anchors":              [16,15, 34,45, 42,153, 68,63, 80,277, 99,120, 148,340, 187,170, 280,365],
+        "anchors1":          [14,12, 25,36, 40,102, 50,46, 52,227, 88,72, 92,328, 94,136, 127,231, 167,350, 215,153, 295,368],
         "labels":               ["person","helmet", "goodshoes", "badshoes", "LP"]
     },
 
@@ -12,21 +13,21 @@
         "cache_name":           "kangaroo_train.pkl",
 
         "train_times":          2,
-        "batch_size":           12,
-        "learning_rate":        1e-3,
+        "batch_size":           8,
+        "learning_rate":        1e-4,
         "nb_epochs":            150,
         "warmup_epochs":        0,
         "ignore_thresh":        0.5,
         "gpus":                 "0",
 
         "grid_scales":          [1,1,1],
-        "obj_scale":            3,
-        "noobj_scale":          1,
-        "xywh_scale":           1,
+        "obj_scale":            2,
+        "noobj_scale":          2,
+        "xywh_scale":           2,
         "class_scale":          2,
 
         "tensorboard_dir":      "logs/v3",
-        "saved_weights_name":   "weights/MNet_ppa_oim_10.h5",
+        "saved_weights_name":   "weights/ppa2.h5",
         "debug":                false
     },
 

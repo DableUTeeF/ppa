@@ -1,15 +1,22 @@
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 import numpy as np
 import json
-from frontend import create_yolov3_model, dummy_loss, mnet_yolov3_model
-from preprocessing import Y3BatchGenerator, parse_annotation
+from frontend import create_yolov3_model, dummy_loss, mnet_yolov3_model, rnet50_yolov3_model
+from preprocessing import Y3BatchGeneratorS1, parse_annotation
 from utils import normalize, evaluate, makedirs
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau
-from utils import AdamW
+from utils import AdamW, SGDW
+from keras.optimizers import Adam
 from callbacks import CustomModelCheckpoint, CustomTensorBoard
 import tensorflow as tf
-from keras.models import load_model
+# from keras.backend.tensorflow_backend import set_session
+# config = tf.ConfigProto()
+# config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
+# config.log_device_placement = True  # to log device placement (on which device the operation ran)
+# sess = tf.Session(config=config)
+# set_session(sess)  # set this TensorFlow session as the default session for Keras
 
 
 def create_training_instances(train_annot_folder,
@@ -90,7 +97,7 @@ def create_callbacks(saved_weights_name, tensorboard_logs, model_to_save):
         write_graph=True,
         write_images=True,
     )
-    return [early_stop, checkpoint, reduce_on_plateau, tensorboard]
+    return [checkpoint, reduce_on_plateau, tensorboard]
 
 
 def create_model(
@@ -109,24 +116,7 @@ def create_model(
         xywh_scale,
         class_scale
 ):
-    if multi_gpu > 1:
-        with tf.device('/cpu:0'):
-            template_model, infer_model = mnet_yolov3_model(
-                nb_class=nb_class,
-                anchors=anchors,
-                max_box_per_image=max_box_per_image,
-                max_grid=max_grid,
-                batch_size=batch_size // multi_gpu,
-                warmup_batches=warmup_batches,
-                ignore_thresh=ignore_thresh,
-                grid_scales=grid_scales,
-                obj_scale=obj_scale,
-                noobj_scale=noobj_scale,
-                xywh_scale=xywh_scale,
-                class_scale=class_scale
-            )
-    else:
-        template_model, infer_model = mnet_yolov3_model(
+    template_model, infer_model = create_yolov3_model(
             nb_class=nb_class,
             anchors=anchors,
             max_box_per_image=max_box_per_image,
@@ -148,7 +138,8 @@ def create_model(
 
     train_model = template_model
 
-    optimizer = AdamW(lr=lr, clipnorm=0.001)
+    optimizer = Adam(lr=lr, clipnorm=0.001)
+    # optimizer = SGDW(lr=lr, momentum=0.9)
     train_model.compile(loss=dummy_loss, optimizer=optimizer)
 
     return train_model, infer_model
@@ -156,7 +147,7 @@ def create_model(
 
 if __name__ == '__main__':
 
-    config_path = 'config/config4.json'
+    config_path = 'config/config8.json'
 
     with open(config_path) as config_buffer:
         config = json.loads(config_buffer.read())
@@ -176,7 +167,7 @@ if __name__ == '__main__':
     ###############################
     #   Create the generators
     ###############################
-    train_generator = Y3BatchGenerator(
+    train_generator = Y3BatchGeneratorS1(
         instances=train_ints,
         anchors=config['model']['anchors'],
         labels=labels,
@@ -190,7 +181,7 @@ if __name__ == '__main__':
         norm=normalize
     )
 
-    valid_generator = Y3BatchGenerator(
+    valid_generator = Y3BatchGeneratorS1(
         instances=valid_ints,
         anchors=config['model']['anchors'],
         labels=labels,
@@ -230,7 +221,6 @@ if __name__ == '__main__':
         xywh_scale=config['train']['xywh_scale'],
         class_scale=config['train']['class_scale'],
     )
-    infer_model.summary()
     ###############################
     #   Kick off the training
     ###############################
@@ -242,9 +232,10 @@ if __name__ == '__main__':
         epochs=config['train']['nb_epochs'] + config['train']['warmup_epochs'],
         verbose=2 if config['train']['debug'] else 1,
         callbacks=callbacks,
-        workers=4,
+        workers=2,
         max_queue_size=8,
-        validation_data=valid_generator
+        validation_data=valid_generator,
+        use_multiprocessing=True,
     )
 
     # make a GPU version of infer_model for evaluation

@@ -8,7 +8,7 @@ import json
 
 
 def _main_():
-    config_path = 'config/config3.json'
+    config_path = 'config/config9.json'
 
     with open(config_path) as config_buffer:
         config = json.loads(config_buffer.read())

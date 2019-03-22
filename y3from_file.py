@@ -2,21 +2,21 @@ import cv2
 import os
 
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
-from frontend import mnet_yolov3_model
+from frontend import mnet_yolov3_model, rnet50_yolov3_model, create_yolov3_model
 import json
 from utils import draw_boxesv3, preprocess_input, decode_netoutv3, do_nms, correct_yolo_boxes
 from PIL import Image
 import numpy as np
-
+from preprocessing import minmaxresize
 
 if __name__ == '__main__':
 
-    config_path = 'config/config4.json'
+    config_path = 'config/config8.json'
 
     with open(config_path) as config_buffer:
         config = json.loads(config_buffer.read())
 
-    _, infer_model = mnet_yolov3_model(
+    _, infer_model = rnet50_yolov3_model(
         nb_class=len(config['model']['labels']),
         anchors=config['model']['anchors'],
         max_box_per_image=30,
@@ -51,7 +51,7 @@ if __name__ == '__main__':
         # filename = 'download.jpeg'
         p = os.path.join(path, np.random.choice(os.listdir(path)))
         image = cv2.imread(p)
-        image = cv2.resize(image, (416, 416))
+        image, w, h = minmaxresize(image, 416, 800)
         if pad:
             imsize = image.shape
             if imsize[0] > imsize[1]:
