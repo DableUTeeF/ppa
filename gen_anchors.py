@@ -10,13 +10,13 @@ argparser = argparse.ArgumentParser()
 argparser.add_argument(
     '-c',
     '--conf',
-    default='config.json',
+    default='config/config9.json',
     help='path to configuration file')
 
 argparser.add_argument(
     '-a',
     '--anchors',
-    default=8,
+    default=12,
     help='number of anchors to use')
 
 

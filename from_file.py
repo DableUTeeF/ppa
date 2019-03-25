@@ -63,7 +63,8 @@ if __name__ == '__main__':
                 image = tempim
                 h = imsize[1]
                 w = imsize[1]
-        image, _, _ = minmaxresize(image, 384, 512)
+        # image, _, _ = minmaxresize(image, 384, 512)
+        image = cv2.resize(image, (416, 416))
         hour = datetime.now().hour
         minute = datetime.now().minute
         second = datetime.now().second

@@ -707,7 +707,7 @@ class BatchGenS1(BatchGenerator):
             np.random.shuffle(self.images)
 
     def __len__(self):
-        return int(np.ceil(float(len(self.images)) / self.config['BATCH_SIZE']))
+        return len(self.images)
 
     def num_classes(self):
         return len(self.config['LABELS'])

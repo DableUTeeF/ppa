@@ -1,10 +1,10 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
+from datetime import datetime
 import numpy as np
 import json
 from frontend import create_yolov3_model, dummy_loss, mnet_yolov3_model, rnet50_yolov3_model
-from preprocessing import Y3BatchGeneratorS1, parse_annotation
+from preprocessing import Y3BatchGenerator, parse_annotation
 from utils import normalize, evaluate, makedirs
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from utils import AdamW, SGDW
@@ -92,8 +92,10 @@ def create_callbacks(saved_weights_name, tensorboard_logs, model_to_save):
         cooldown=0,
         min_lr=0
     )
+    logdir = tensorboard_logs + os.path.split(saved_weights_name)[-1][:-3] + ' ' + str(datetime.now())
+
     tensorboard = CustomTensorBoard(
-        log_dir=tensorboard_logs,
+        log_dir=logdir,
         write_graph=True,
         write_images=True,
     )
@@ -135,6 +137,8 @@ def create_model(
     if os.path.exists(saved_weights_name):
         print("\nLoading pretrained weights.\n")
         template_model.load_weights(saved_weights_name)
+    else:
+        template_model.load_weights('backend.h5', by_name=True)
 
     train_model = template_model
 
@@ -167,7 +171,7 @@ if __name__ == '__main__':
     ###############################
     #   Create the generators
     ###############################
-    train_generator = Y3BatchGeneratorS1(
+    train_generator = Y3BatchGenerator(
         instances=train_ints,
         anchors=config['model']['anchors'],
         labels=labels,
@@ -181,7 +185,7 @@ if __name__ == '__main__':
         norm=normalize
     )
 
-    valid_generator = Y3BatchGeneratorS1(
+    valid_generator = Y3BatchGenerator(
         instances=valid_ints,
         anchors=config['model']['anchors'],
         labels=labels,
@@ -235,7 +239,7 @@ if __name__ == '__main__':
         workers=2,
         max_queue_size=8,
         validation_data=valid_generator,
-        use_multiprocessing=True,
+        use_multiprocessing=False,
     )
 
     # make a GPU version of infer_model for evaluation
